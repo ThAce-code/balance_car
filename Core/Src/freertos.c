@@ -28,6 +28,7 @@
 #include "mydefine.h"
 #include "imu.h"
 #include "imu/imu_filter.h"
+#include "uart_echo.h"
 
 #include <math.h>
 
@@ -198,11 +199,19 @@ void main_control_task(void *argument)
   imu_status_t imu_status = IMU_Init();
 
   imu_comp_filter_t pitch_filter;
-  imu_comp_filter_cfg_t filter_cfg = {.alpha = 0.98f};
+  // 互补滤波权重：提高 alpha 可减少加速度噪声/振动引入的抖动，但会降低“加速度纠偏”速度。
+  // 结合当前的线加速度门控（急加速/飞坡时会暂时忽略加速度角），这里取更偏向陀螺的权重。
+  imu_comp_filter_cfg_t filter_cfg = {.alpha = 0.99f};
   imu_comp_filter_init(&pitch_filter, filter_cfg, 0.0f);
+
+  // 线加速度门控（用于急加速/急刹/飞坡等场景）：
+  // 当 |acc_norm - 1g| > threshold 时，在 hold_ms 内忽略加速度角，仅用陀螺积分更新。
+  static const float kAccelGateThresholdG = 0.30f;
+  static const uint32_t kAccelGateHoldMs = 80u;
 
   // 简单陀螺零偏标定：上电静止累计约 1s（500 点）求均值。
   // 建议：标定期禁止输出电机 PWM（避免车子乱动导致 bias 不准）。
+  // 这里使用“在线均值”（running average）做零偏估计：标定期间也正常输出姿态用于上位机观察。
   float gx_bias = 0.0f;
   float gy_bias = 0.0f;
   float gz_bias = 0.0f;
@@ -220,11 +229,33 @@ void main_control_task(void *argument)
     if ((flags & IMU_THREAD_FLAG_NEW_SAMPLE) == 0u) {
       // 超时：IMU 没有持续更新，进入安全状态（后续应在此处停 PWM）。
       status.fault_bits |= 0x0001u; // IMU timeout
+
+      // 即使 IMU 超时也发布一次状态，便于上位机/VOFA+ 观测到“链路异常”。
+      // pitch_deg 设为负值作为诊断：
+      // - -1.0：IMU 超时但初始化成功（多半 DRDY/DMA 没跑起来）
+      // - -2.0：IMU 初始化失败（多半 SPI/供电/CS/连线问题）
+      status.timestamp_ms = HAL_GetTick();
+      status.pitch_deg = (imu_status == IMU_OK) ? -1.0f : -2.0f;
+
+      osStatus_t qret = osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
+      if (qret == osErrorResource) {
+        StatusData_t junk;
+        (void)osMessageQueueGet(xStatusQueueHandle, &junk, NULL, 0);
+        (void)osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
+      }
       continue;
     }
 
     if (imu_status != IMU_OK) {
       status.fault_bits |= 0x0002u; // IMU init failed
+      status.timestamp_ms = HAL_GetTick();
+      status.pitch_deg = -2.0f;
+      osStatus_t qret = osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
+      if (qret == osErrorResource) {
+        StatusData_t junk;
+        (void)osMessageQueueGet(xStatusQueueHandle, &junk, NULL, 0);
+        (void)osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
+      }
       continue;
     }
 
@@ -240,32 +271,37 @@ void main_control_task(void *argument)
     float gz_dps = ((float)raw.gz) / kGyroLsbPerDps;
 
     float ax_g = ((float)raw.ax) / kAccelLsbPerG;
-    (void)ax_g; // reserved for future use (e.g., roll/tilt checks)
     float ay_g = ((float)raw.ay) / kAccelLsbPerG;
     float az_g = ((float)raw.az) / kAccelLsbPerG;
+    float acc_norm_g = sqrtf(ax_g * ax_g + ay_g * ay_g + az_g * az_g);
 
     // 陀螺零偏标定（要求小车静止）。
+    // 标定期间不影响遥测输出；但控制输出（PWM）应保持关闭/安全态。
     if (calib_count < calib_target) {
-      gx_bias += gx_dps;
-      gy_bias += gy_dps;
-      gz_bias += gz_dps;
       calib_count++;
-      if (calib_count == calib_target) {
-        gx_bias /= (float)calib_target;
-        gy_bias /= (float)calib_target;
-        gz_bias /= (float)calib_target;
-      }
-      continue;
+      float inv_n = 1.0f / (float)calib_count;
+      gx_bias = gx_bias + (gx_dps - gx_bias) * inv_n;
+      gy_bias = gy_bias + (gy_dps - gy_bias) * inv_n;
+      gz_bias = gz_bias + (gz_dps - gz_bias) * inv_n;
     }
 
+    // 去零偏后的陀螺（标定未完成时使用“当前估计的 bias”）。
     gx_dps -= gx_bias;
     gy_dps -= gy_bias;
     gz_dps -= gz_bias;
 
-    // 轴向约定（你给的约定）：X 轴为 pitch 轴（绕 X 旋转是俯仰）。
-    // 加速度求 pitch：使用 ay/az；陀螺积分用 gx。
-    float pitch_acc_deg = atan2f(ay_g, az_g) * (180.0f / (float)M_PI);
-    float pitch_deg = imu_comp_filter_update_pitch_deg(&pitch_filter, gx_dps, pitch_acc_deg, kDtS);
+    // 轴向约定（按车体坐标）：pitch 轴为 Y。
+    // pitch_acc：绕 Y 轴转动时，重力在 X/Z 平面内变化，因此用 ax/az 计算角度；陀螺使用 gy。
+    // 约定：车体“前倾”为正。根据当前安装方向，需要对 pitch 取负以匹配该约定。
+    float pitch_acc_deg = -atan2f(ax_g, az_g) * (180.0f / (float)M_PI);
+    float pitch_deg = imu_comp_filter_update_pitch_deg_gated(&pitch_filter,
+                                                             -gy_dps,
+                                                             pitch_acc_deg,
+                                                             kDtS,
+                                                             acc_norm_g,
+                                                             kAccelGateThresholdG,
+                                                             kAccelGateHoldMs,
+                                                             raw.timestamp_ms);
 
     // 读取最新的上位机命令（队列深度=1，只保留最新目标；取不到则沿用上一次命令）。
     while (osMessageQueueGet(xHostCommandQueueHandle, &cmd, NULL, 0) == osOK) {
@@ -278,7 +314,15 @@ void main_control_task(void *argument)
     // 发布状态给 Comm/OLED 任务（队列深度=1：如果队列满则丢弃旧的，始终保留最新一份）。
     status.timestamp_ms = raw.timestamp_ms;
     status.pitch_deg = pitch_deg;
-    status.gyro_y_dps = gy_dps;
+    status.pitch_acc_deg = pitch_acc_deg;
+
+    // 遥测保持 IMU 物理轴：ax/ay/az 与 gx/gy/gz 不做对调，便于后续标定与轴向确认。
+    status.ax_g = ax_g;
+    status.ay_g = ay_g;
+    status.az_g = az_g;
+    status.gx_dps = gx_dps;
+    status.gy_dps = gy_dps;
+    status.gz_dps = gz_dps;
     status.speed_mps = 0.0f;
     status.pwm_l = 0;
     status.pwm_r = 0;
@@ -304,10 +348,16 @@ void main_control_task(void *argument)
 void comm_task(void *argument)
 {
   /* USER CODE BEGIN comm_task */
+  // RX DMA echo 测试：PC 发什么过来，就原样回显什么。
+  // 本次测试先不周期性发送 IMU（VOFA+），避免刷屏。
+
+  (void)UART_Echo_StartRxDma(&huart3);
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    (void)osThreadFlagsWait(UART_ECHO_FLAG_RX | UART_ECHO_FLAG_TX, osFlagsWaitAny, osWaitForever);
+    UART_Echo_TaskPump(&huart3);
   }
   /* USER CODE END comm_task */
 }

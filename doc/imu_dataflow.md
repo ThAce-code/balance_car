@@ -48,8 +48,8 @@
 
 ### 4.1 陀螺零偏标定（启动阶段）
 
-- `MainControlTask` 前 500 帧（约 1 秒）累计 `gx/gy/gz` 的均值作为 bias。
-- 标定期间建议不输出电机 PWM，保证小车静止。
+- `MainControlTask` 前 500 帧（约 1 秒）对 `gx/gy/gz` 做在线均值估计作为 bias（running average）。
+- 标定期间建议不输出电机 PWM，保证小车静止；遥测仍可正常发送用于观察姿态/噪声。
 
 ### 4.2 单位换算（当前默认量程）
 
@@ -83,3 +83,4 @@
 - SPI 错误恢复：`HAL_SPI_ErrorCallback()` 计数后，任务检测阈值并复位 IMU/SPI
 - DRDY 过载统计：关注 `overrun_count/drdy_pending`，评估是否需要降低 ODR 或优化 ISR
 - dt 自适应：目前 `kDtS=0.002` 常量；可改用 `raw.timestamp_ms` 或 DWT 周期计算真实 dt
+- 线加速度门控：当 `|sqrt(ax^2+ay^2+az^2) - 1g|` 较大（急加速/急刹/飞坡）时，短时间忽略加速度角，仅用陀螺积分更新，减少姿态抖动

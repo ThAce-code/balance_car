@@ -50,6 +50,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     components/imu/imu_spi.c
     components/imu/imu_filter.c
+    components/comm/vofa_justfloat.c
+    components/comm/ringbuf.c
 )
 
 # User modules (non-CubeMX)

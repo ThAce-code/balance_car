@@ -46,8 +46,16 @@ typedef struct {
     uint32_t timestamp_ms;
     // 姿态：互补滤波输出的 pitch（deg）
     float pitch_deg;
-    // 调试字段：当前示例填的是 gy_dps（后续可按需要调整）
-    float gyro_y_dps;
+    // 姿态：未融合（加速度计推算）的 pitch（deg），用于对比/调参
+    float pitch_acc_deg;
+    // IMU：加速度（g）
+    float ax_g;
+    float ay_g;
+    float az_g;
+    // IMU：角速度（deg/s，已去零偏）
+    float gx_dps;
+    float gy_dps;
+    float gz_dps;
     // 速度估计（m/s），后续由编码器补上
     float speed_mps;
     // PWM 输出（示例占位，后续按你的电机驱动/映射定义）
