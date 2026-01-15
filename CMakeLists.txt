@@ -48,6 +48,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    components/imu/imu_spi.c
+    components/imu/imu_filter.c
 )
 
 # User modules (non-CubeMX)
@@ -57,6 +59,10 @@ add_subdirectory(APP)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
         APP
+)
+
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/components
 )
 
 # Remove wrong libob.a library dependency when using cpp files

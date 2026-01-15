@@ -58,11 +58,11 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CS_GPIO_Port, CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : PC5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  /*Configure GPIO pin : IMU_INT_Pin */
+  GPIO_InitStruct.Pin = IMU_INT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(IMU_INT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LED_Pin CS_Pin */
   GPIO_InitStruct.Pin = LED_Pin|CS_Pin;
