@@ -6,7 +6,7 @@
 - `Core/`: CubeMX-generated application and HAL init (`Core/Src`, `Core/Inc`). Keep edits inside `/* USER CODE BEGIN */` blocks.
 - `APP/`: User/application modules (preferred place for new features). Examples: `APP/led.c`, `APP/scheduler.c`.
 - `Drivers/`, `Middlewares/`: Vendor libraries (CMSIS, HAL, FreeRTOS). Avoid modifying.
-- `doc/`: Design notes and plans (e.g., `doc/plan_v2.md`, `doc/imu_plan.md`, `doc/basic_infro.md`).
+- `doc/`: Design notes and plans (e.g., `doc/plan/plan_v2.md`, `doc/plan/imu_plan.md`, `doc/basic_info.md`).
 - `cmake/`: Toolchain and CubeMX CMake integration.
 
 ## Build, Test, and Development Commands
@@ -37,5 +37,5 @@ No automated test framework is set up in this repo yet. If you add tests, keep t
 
 ## Notes for Contributors
 
-- When changing pins/peripherals, update both `balance_car.ioc` and `doc/basic_infro.md`.
-- For control/RTOS changes, keep `doc/plan_v2.md` aligned with implementation.
+- When changing pins/peripherals, update both `balance_car.ioc` and `doc/basic_info.md`.
+- For control/RTOS changes, keep `doc/plan/plan_v2.md` aligned with implementation.

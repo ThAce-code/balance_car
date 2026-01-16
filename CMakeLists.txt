@@ -52,6 +52,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     components/imu/imu_filter.c
     components/comm/vofa_justfloat.c
     components/comm/ringbuf.c
+    components/OLED/ssd1306.c
+    components/OLED/ssd1306_fonts.c
 )
 
 # User modules (non-CubeMX)

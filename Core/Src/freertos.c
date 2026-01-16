@@ -29,6 +29,9 @@
 #include "imu.h"
 #include "imu/imu_filter.h"
 #include "uart_echo.h"
+#include "oled_ui.h"
+#include "status_store.h"
+#include "vofa_telemetry.h"
 
 #include <math.h>
 
@@ -237,12 +240,7 @@ void main_control_task(void *argument)
       status.timestamp_ms = HAL_GetTick();
       status.pitch_deg = (imu_status == IMU_OK) ? -1.0f : -2.0f;
 
-      osStatus_t qret = osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
-      if (qret == osErrorResource) {
-        StatusData_t junk;
-        (void)osMessageQueueGet(xStatusQueueHandle, &junk, NULL, 0);
-        (void)osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
-      }
+      StatusStore_Write(&status);
       continue;
     }
 
@@ -250,12 +248,7 @@ void main_control_task(void *argument)
       status.fault_bits |= 0x0002u; // IMU init failed
       status.timestamp_ms = HAL_GetTick();
       status.pitch_deg = -2.0f;
-      osStatus_t qret = osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
-      if (qret == osErrorResource) {
-        StatusData_t junk;
-        (void)osMessageQueueGet(xStatusQueueHandle, &junk, NULL, 0);
-        (void)osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
-      }
+      StatusStore_Write(&status);
       continue;
     }
 
@@ -328,12 +321,7 @@ void main_control_task(void *argument)
     status.pwm_r = 0;
     status.mode = cmd.mode;
 
-    osStatus_t qret = osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
-    if (qret == osErrorResource) {
-      StatusData_t junk;
-      (void)osMessageQueueGet(xStatusQueueHandle, &junk, NULL, 0);
-      (void)osMessageQueuePut(xStatusQueueHandle, &status, 0, 0);
-    }
+    StatusStore_Write(&status);
   }
   /* USER CODE END main_control_task */
 }
@@ -353,11 +341,38 @@ void comm_task(void *argument)
 
   (void)UART_Echo_StartRxDma(&huart3);
 
+  // Telemetry (VOFA+ JustFloat): send latest status snapshot periodically via TX DMA.
+  const uint32_t kTelemetryPeriodMs = 20; // 50Hz
+  uint32_t next_tx_ms = HAL_GetTick() + kTelemetryPeriodMs;
+
   /* Infinite loop */
   for(;;)
   {
-    (void)osThreadFlagsWait(UART_ECHO_FLAG_RX | UART_ECHO_FLAG_TX, osFlagsWaitAny, osWaitForever);
-    UART_Echo_TaskPump(&huart3);
+    // Wait for RX/TX events, but wake up periodically to send telemetry.
+    uint32_t flags = osThreadFlagsWait(UART_ECHO_FLAG_RX | UART_ECHO_FLAG_TX, osFlagsWaitAny, 5);
+    if ((int32_t)flags >= 0) {
+      if ((flags & (UART_ECHO_FLAG_RX | UART_ECHO_FLAG_TX)) != 0u) {
+        UART_Echo_TaskPump(&huart3);
+      }
+    }
+
+    uint32_t now_ms = HAL_GetTick();
+    if ((int32_t)(now_ms - next_tx_ms) >= 0) {
+      next_tx_ms += kTelemetryPeriodMs;
+
+      StatusData_t s;
+      if (StatusStore_Read(&s)) {
+        (void)VOFA_SendImu8_Dma(&huart3,
+                               s.pitch_deg,
+                               s.pitch_acc_deg,
+                               s.ax_g,
+                               s.ay_g,
+                               s.az_g,
+                               s.gx_dps,
+                               s.gy_dps,
+                               s.gz_dps);
+      }
+    }
   }
   /* USER CODE END comm_task */
 }
@@ -372,10 +387,17 @@ void comm_task(void *argument)
 void OLED_display_task(void *argument)
 {
   /* USER CODE BEGIN OLED_display_task */
+  OledUi_Init();
+
+  StatusData_t last = {0};
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    (void)StatusStore_Read(&last);
+
+    OledUi_Render(&last);
+    osDelay(100);
   }
   /* USER CODE END OLED_display_task */
 }
