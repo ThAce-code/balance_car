@@ -1,6 +1,6 @@
-# 串口收发解析说明（USART3 DMA + IDLE）
+# USART3 DMA + IDLE 实现说明
 
-> 目的：说明当前工程的 USART3 数据“如何接收、如何发送”，以及如何从当前的 echo 测试平滑升级到二进制协议（`doc/plan_v2.md`）。
+> 目的：说明当前工程的 USART3 数据"如何接收、如何发送"，以及如何从当前的 echo 测试平滑升级到二进制协议（`doc/plan/plan_v2.md`）。
 
 ## 1. 总体思路
 
@@ -79,7 +79,7 @@ Echo 只是验证链路与“RX 字节流抽取”正确。接入协议时建议
 1) 保留 RX DMA + ringbuf 的基础设施不变
 2) 在 `CommTask` 内用“解析器状态机”消费 ringbuf：
    - `while (ringbuf_available) { read 1..N bytes; feed(proto_rx, bytes); }`
-3) 解析器输出完整帧后，按 `doc/plan_v2.md` 的 `MSG_ID` 分发：
+3) 解析器输出完整帧后，按 `doc/plan/plan_v2.md` 的 `MSG_ID` 分发：
    - `SET_TARGET` → 写 `xHostCommandQueue`（深度=1，只保留最新）
    - `TELEM_CONFIG` → 更新遥测开关/周期
    - `ESTOP` → 置模式并触发保护

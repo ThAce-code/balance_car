@@ -5,17 +5,13 @@
 #include <string.h>
 
 static volatile uint8_t s_vofa_tx_in_flight = 0u;
-static uint8_t s_vofa_frame[8 * 4 + 4];
+static uint8_t s_vofa_frame[4 * 4 + 4];
 
-bool VOFA_SendImu8_Dma(UART_HandleTypeDef *huart,
-                       float pitch_deg,
-                       float pitch_acc_deg,
-                       float ax_g,
-                       float ay_g,
-                       float az_g,
-                       float gx_dps,
-                       float gy_dps,
-                       float gz_dps)
+bool VOFA_SendPitch2Speed2_Dma(UART_HandleTypeDef *huart,
+                               float pitch_deg,
+                               float pitch_acc_deg,
+                               float wheel_l_mps,
+                               float wheel_r_mps)
 {
     if (huart == NULL) {
         return false;
@@ -28,8 +24,8 @@ bool VOFA_SendImu8_Dma(UART_HandleTypeDef *huart,
 
     // 通道顺序（VOFA+ 通道 1..8）：
     // pitch_deg, pitch_acc_deg, ax_g, ay_g, az_g, gx_dps, gy_dps, gz_dps
-    float ch[8] = {pitch_deg, pitch_acc_deg, ax_g, ay_g, az_g, gx_dps, gy_dps, gz_dps};
-    if (vofa_justfloat_pack(s_vofa_frame, sizeof(s_vofa_frame), ch, 8) != sizeof(s_vofa_frame)) {
+    float ch[4] = {pitch_deg, pitch_acc_deg, wheel_l_mps, wheel_r_mps};
+    if (vofa_justfloat_pack(s_vofa_frame, sizeof(s_vofa_frame), ch, 4) != sizeof(s_vofa_frame)) {
         return false;
     }
 

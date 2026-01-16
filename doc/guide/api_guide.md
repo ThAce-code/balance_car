@@ -18,6 +18,7 @@
    - [3.4 OLED UI](#34-oled-ui-appoled_uih)
    - [3.5 状态存储](#35-状态存储-appstatus_storeh)
    - [3.6 全局数据结构](#36-全局数据结构-appmydefineh)
+   - [3.7 编码器驱动](#37-编码器驱动-appencoderh)
 4. [典型使用流程](#4-典型使用流程)
 
 ---
@@ -403,11 +404,11 @@ while (1) {
 
 ```c
 // 发送 8 通道数据：pitch、pitch_acc、3轴acc、3轴gyro
-bool VOFA_SendImu8_Dma(UART_HandleTypeDef *huart,
-                       float pitch_deg,
-                       float pitch_acc_deg,
-                       float ax_g, float ay_g, float az_g,
-                       float gx_dps, float gy_dps, float gz_dps);
+bool VOFA_SendPitch2Speed2_Dma(UART_HandleTypeDef *huart,
+                               float pitch_deg,
+                               float pitch_acc_deg,
+                               float wheel_l_mps,
+                               float wheel_r_mps);
 // 返回：true=发送成功，false=TX 忙（丢帧）
 ```
 
@@ -507,6 +508,138 @@ typedef struct {
 | bit0 | IMU 超时 |
 | bit1 | IMU 初始化失败 |
 | ... | 待扩展 |
+
+---
+
+### 3.7 编码器驱动 (`APP/encoder.h`)
+
+#### 功能
+
+双轮正交编码器驱动，使用 TIM3/TIM4 的编码器接口模式，测量轮速用于平衡控制和速度反馈。
+
+#### 硬件配置
+
+| 外设 | 引脚 | 说明 |
+|------|------|------|
+| TIM4 | PD12=CH1, PD13=CH2 | **左轮**编码器 |
+| TIM3 | PA6=CH1, PA7=CH2 | **右轮**编码器 |
+| 模式 | TIM_ENCODERMODE_TI12 | 4 倍频计数 |
+
+#### 编码器参数
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| PPR | 500 | 编码器线数（电机轴） |
+| 减速比 | 1:28 | 电机轴 → 输出轴 |
+| 轮径 | 65mm | 轮子直径 |
+| 输出轴每转计数 | 56000 | 500 × 4 × 28 |
+
+#### 核心数据结构
+
+```c
+// 配置参数
+typedef struct {
+    uint16_t ppr;              // 编码器 PPR (电机轴)
+    float wheel_diameter_m;    // 轮径 (米)
+    float gear_ratio;          // 减速比
+    float lpf_alpha;           // 低通滤波系数 (0-1)
+    bool left_inverted;        // 左轮方向取反
+    bool right_inverted;       // 右轮方向取反
+} encoder_config_t;
+
+// 单轮数据
+typedef struct {
+    int32_t delta_counts;       // 本周期计数差（有符号）
+    float speed_mps;            // 原始速度 (m/s)
+    float speed_filtered_mps;   // 滤波后速度 (m/s)
+} encoder_data_t;
+
+// 双轮读数
+typedef struct {
+    encoder_data_t left;        // 左轮 (TIM4)
+    encoder_data_t right;       // 右轮 (TIM3)
+    float avg_speed_mps;        // 左右平均速度
+    uint32_t timestamp_ms;      // 时间戳
+} encoder_reading_t;
+```
+
+#### 主要 API
+
+| 函数 | 说明 |
+|------|------|
+| `Encoder_Init(cfg)` | 初始化编码器，启动 TIM3/TIM4 |
+| `Encoder_Update(dt_s, out)` | 读取计数、计算速度、滤波 |
+| `Encoder_GetLatest(out)` | 获取只读快照 |
+| `Encoder_Reset()` | 重置计数器和滤波器 |
+| `Encoder_SetConfig(cfg)` | 运行时更新配置 |
+
+#### 关键算法
+
+**16 位计数器溢出处理**：
+
+利用有符号 16 位减法自动处理溢出：
+
+```c
+// 假设 previous=0xFFFE, current=0x0002
+// 无符号差分: 0x0002 - 0xFFFE = 0x0004 (+4) ✓
+// 假设 previous=0x0002, current=0xFFFE
+// 无符号差分: 0xFFFE - 0x0002 = 0xFFFC (-4) ✓
+int16_t delta = (int16_t)(current_cnt - last_cnt);
+```
+
+**速度计算**：
+
+```
+counts_per_wheel_rev = PPR × 4 × gear_ratio = 500 × 4 × 28 = 56000
+counts_to_m = π × diameter / counts_per_wheel_rev ≈ 3.644e-6 m/count
+speed_mps = delta_counts × counts_to_m / dt_s
+```
+
+**一阶低通滤波**：
+
+```c
+// y[n] = α × x[n] + (1-α) × y[n-1]
+speed_filtered = lpf_alpha * speed_raw + (1 - lpf_alpha) * speed_filtered_prev;
+```
+
+#### 使用示例（MainControlTask）
+
+```c
+// 初始化
+encoder_config_t enc_cfg = ENCODER_CONFIG_DEFAULT;
+enc_cfg.lpf_alpha = 0.3f;  // 可调参
+Encoder_Init(&enc_cfg);
+
+encoder_reading_t enc_reading = {0};
+
+// 主循环（每 2ms）
+Encoder_Update(0.002f, &enc_reading);
+
+// 更新状态用于遥测
+status.speed_mps = enc_reading.avg_speed_mps;
+status.wheel_l_mps = enc_reading.left.speed_filtered_mps;
+status.wheel_r_mps = enc_reading.right.speed_filtered_mps;
+```
+
+#### 方向调整
+
+如果推车时速度符号与预期相反（正应该前进却显示负），可以在初始化时取反：
+
+```c
+encoder_config_t cfg = ENCODER_CONFIG_DEFAULT;
+cfg.left_inverted = true;   // 左轮反转
+// cfg.right_inverted = true; // 右轮反转（根据实际情况）
+Encoder_Init(&cfg);
+```
+
+#### 与 StatusData_t 的字段对应
+
+```c
+// StatusData_t 中新增的编码器相关字段
+float speed_mps;       // avg_speed_mps (左右平均)
+float wheel_l_mps;     // left.speed_filtered_mps
+float wheel_r_mps;     // right.speed_filtered_mps
+```
 
 ---
 

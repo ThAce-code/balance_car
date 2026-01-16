@@ -54,13 +54,13 @@
 
 ### 5.2 编码器（正交）
 
-- TIM3 Encoder Interface（TI12）：
-  - `PA6` → TIM3_CH1
-  - `PA7` → TIM3_CH2
-  - Period=0xFFFF, IC Filter=6
-- TIM4 Encoder Interface（TI12）：
+- TIM4 Encoder Interface（TI12）【L/左轮】：
   - `PD12` → TIM4_CH1
   - `PD13` → TIM4_CH2
+  - Period=0xFFFF, IC Filter=6
+- TIM3 Encoder Interface（TI12）【R/右轮】：
+  - `PA6` → TIM3_CH1
+  - `PA7` → TIM3_CH2
   - Period=0xFFFF, IC Filter=6
 
 ### 5.3 电机 PWM
@@ -118,8 +118,8 @@
 | IMU SPI | SCK / MISO / MOSI | PA5 / PB4 / PB5          |
 | IMU 片选 | CS | PB12                     |
 | IMU 中断 | DRDY(EXTI5) | PC5                      |
-| 编码器 L | TIM3_CH1 / CH2 | PA6 / PA7                |
-| 编码器 R | TIM4_CH1 / CH2 | PD12 / PD13              |
+| 编码器 L | TIM4_CH1 / CH2 | PD12 / PD13              |
+| 编码器 R | TIM3_CH1 / CH2 | PA6 / PA7                |
 | 电机 PWM | TIM1_CH1/2/3/4 | PE9 / PE11 / PE13 / PE14 |
 | OLED I2C | SCL / SDA | PB6 / PB7                |
 | 上位机串口 | USART3_TX / RX | PD8 / PD9                |

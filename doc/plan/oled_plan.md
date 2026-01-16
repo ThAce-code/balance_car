@@ -9,6 +9,7 @@
 
 ```
 PITCH:+12.34deg
+L:+0.00 R:+0.00
 M:1  F:0003
 ```
 
@@ -46,6 +47,6 @@ M:1  F:0003
 
 ## 验收标准
 
-- 上电后 OLED 能稳定显示 `PITCH:+x.xxdeg`，角落显示 `mode` 与 `fault_bits`。
+- 上电后 OLED 能稳定显示 `PITCH:+x.xxdeg`、`L/R` 轮速，并显示 `mode` 与 `fault_bits`。
 - 车体缓慢前后倾斜时，显示数值方向与 VOFA+ 上的 pitch 一致（正负号一致）。
 - OLED 刷新不影响控制环：`MainControlTask` 无明显超时/丢帧（以线程 flag / fault_bits 观测）。

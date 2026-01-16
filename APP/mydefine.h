@@ -58,6 +58,9 @@ typedef struct {
     float gz_dps;
     // 速度估计（m/s），后续由编码器补上
     float speed_mps;
+    // Left/right wheel speed (m/s), to be filled by encoder module later
+    float wheel_l_mps;
+    float wheel_r_mps;
     // PWM 输出（示例占位，后续按你的电机驱动/映射定义）
     int16_t pwm_l;
     int16_t pwm_r;

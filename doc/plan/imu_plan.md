@@ -5,7 +5,7 @@
 ## 0. 前置条件与约束
 
 - MCU：STM32F407ZGT6，系统时钟 168MHz。
-- IMU 接口（来自 `doc/basic_infro.md`）：
+- IMU 接口（来自 `doc/basic_info.md`）：
   - SPI1：`PA5(SCK) / PB4(MISO) / PB5(MOSI)`，`SPI_BAUDRATEPRESCALER_8`，约 `10.5Mbit/s`
   - CS：`PB12`（GPIO 输出，上电默认 High）
   - INT：`PC5`（EXTI5，上升沿，内部下拉；通常用作 DRDY）
@@ -20,7 +20,7 @@
 2. IMU 采集流水线（DMA + 双缓冲，可选 DRDY 触发），输出时间戳对齐的 `acc/gyro`。
 3. 标定与补偿（至少：陀螺零偏；可选：加速度零偏/比例）。
 4. 互补滤波输出（至少：`pitch`；可选：`roll`），并完成轴向映射/符号约定。
-5. 遥测支持（按 `doc/plan_v2.md` 协议：`STATUS` 默认，`IMU_RAW` 可选）。
+5. 遥测支持（按 `doc/plan/plan_v2.md` 协议：`STATUS` 默认，`IMU_RAW` 可选）。
 6. 验证脚本/用例说明（如何测频率、抖动、数据一致性、异常恢复）。
 
 ## 2. 设计决策（推荐实现路径）

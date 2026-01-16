@@ -15,15 +15,11 @@ extern "C" {
  * 说明：
  * - 使用 USART TX DMA（非阻塞）。若上一帧仍在发送，则本次会丢帧（返回 false）。
  */
-bool VOFA_SendImu8_Dma(UART_HandleTypeDef *huart,
-                       float pitch_deg,
-                       float pitch_acc_deg,
-                       float ax_g,
-                       float ay_g,
-                       float az_g,
-                       float gx_dps,
-                       float gy_dps,
-                       float gz_dps);
+bool VOFA_SendPitch2Speed2_Dma(UART_HandleTypeDef *huart,
+                               float pitch_deg,
+                               float pitch_acc_deg,
+                               float wheel_l_mps,
+                               float wheel_r_mps);
 
 // 由 UART HAL 回调分发调用（中断上下文），用于清除 TX busy
 void VOFA_OnUartTxCpltIsr(UART_HandleTypeDef *huart);

@@ -70,7 +70,7 @@
 
 ## 5. 状态发布与队列策略
 
-- `MainControlTask` 每帧产生 `StatusData_t`，通过 `xStatusQueue`（深度=1）发布给 `CommTask/OLEDTask`。
+- `MainControlTask` 每帧产生 `StatusData_t`，写入 `StatusStore`（单写者、多读者最新快照），供 `CommTask/OLEDTask` 随时读取。
 - 深度=1 的含义：不追求“全量历史”，只保留“最新状态快照”，队列满时丢弃旧的，避免排队延迟累积。
 
 ## 6. 异常与保护（当前实现/建议扩展）

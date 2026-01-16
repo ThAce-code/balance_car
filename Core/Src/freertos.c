@@ -32,6 +32,7 @@
 #include "oled_ui.h"
 #include "status_store.h"
 #include "vofa_telemetry.h"
+#include "encoder.h"
 
 #include <math.h>
 
@@ -84,11 +85,6 @@ const osThreadAttr_t OLEDDisplayTask_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
-/* Definitions for xStatusQueue */
-osMessageQueueId_t xStatusQueueHandle;
-const osMessageQueueAttr_t xStatusQueue_attributes = {
-  .name = "xStatusQueue"
-};
 /* Definitions for xHostCommandQueue */
 osMessageQueueId_t xHostCommandQueueHandle;
 const osMessageQueueAttr_t xHostCommandQueue_attributes = {
@@ -130,9 +126,6 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of xStatusQueue */
-  xStatusQueueHandle = osMessageQueueNew (1, sizeof(StatusData_t), &xStatusQueue_attributes);
-
   /* creation of xHostCommandQueue */
   xHostCommandQueueHandle = osMessageQueueNew (1, sizeof(HostCommand_t), &xHostCommandQueue_attributes);
 
@@ -221,8 +214,20 @@ void main_control_task(void *argument)
   uint32_t calib_count = 0;
   const uint32_t calib_target = 500; // ~1s at 500Hz
 
+  // Pitch zeroing: average the initial accel-derived pitch while the IMU is static/level,
+  // then subtract it so "flat" reads ~0deg (e.g. fixes initial ~0.4deg offset).
+  float pitch_zero_deg = 0.0f;
+  float pitch_zero_sum = 0.0f;
+  uint32_t pitch_zero_count = 0;
+  const uint32_t pitch_zero_target = 200;      // ~0.4s at 500Hz
+  const float pitch_zero_acc_tol_g = 0.05f;    // only accept samples when |acc_norm-1g| is small
+
   HostCommand_t cmd = {0};
   StatusData_t status = {0};
+
+  // 初始化编码器模块（TIM3/TIM4 正交编码器）
+  Encoder_Init(NULL);  // 使用默认配置：PPR=500, 轮径=65mm, 减速比=28
+  encoder_reading_t enc_reading = {0};
 
   /* Infinite loop */
   for(;;)
@@ -239,6 +244,8 @@ void main_control_task(void *argument)
       // - -2.0：IMU 初始化失败（多半 SPI/供电/CS/连线问题）
       status.timestamp_ms = HAL_GetTick();
       status.pitch_deg = (imu_status == IMU_OK) ? -1.0f : -2.0f;
+      status.wheel_l_mps = 0.0f;
+      status.wheel_r_mps = 0.0f;
 
       StatusStore_Write(&status);
       continue;
@@ -248,6 +255,8 @@ void main_control_task(void *argument)
       status.fault_bits |= 0x0002u; // IMU init failed
       status.timestamp_ms = HAL_GetTick();
       status.pitch_deg = -2.0f;
+      status.wheel_l_mps = 0.0f;
+      status.wheel_r_mps = 0.0f;
       StatusStore_Write(&status);
       continue;
     }
@@ -286,7 +295,18 @@ void main_control_task(void *argument)
     // 轴向约定（按车体坐标）：pitch 轴为 Y。
     // pitch_acc：绕 Y 轴转动时，重力在 X/Z 平面内变化，因此用 ax/az 计算角度；陀螺使用 gy。
     // 约定：车体“前倾”为正。根据当前安装方向，需要对 pitch 取负以匹配该约定。
-    float pitch_acc_deg = -atan2f(ax_g, az_g) * (180.0f / (float)M_PI);
+    float pitch_acc_raw_deg = -atan2f(ax_g, az_g) * (180.0f / (float)M_PI);
+
+    // Learn the "flat" offset from accel early on (best-effort; requires the car to be still).
+    if (pitch_zero_count < pitch_zero_target) {
+      if (fabsf(acc_norm_g - 1.0f) < pitch_zero_acc_tol_g) {
+        pitch_zero_sum += pitch_acc_raw_deg;
+        pitch_zero_count++;
+        pitch_zero_deg = pitch_zero_sum / (float)pitch_zero_count;
+      }
+    }
+
+    float pitch_acc_deg = pitch_acc_raw_deg - pitch_zero_deg;
     float pitch_deg = imu_comp_filter_update_pitch_deg_gated(&pitch_filter,
                                                              -gy_dps,
                                                              pitch_acc_deg,
@@ -301,7 +321,9 @@ void main_control_task(void *argument)
       // keep newest
     }
 
-    // TODO: encoder read -> speed estimate
+    // 编码器读取 -> 速度估计
+    Encoder_Update(kDtS, &enc_reading);
+
     // TODO: control law -> pwm output (with safety checks)
 
     // 发布状态给 Comm/OLED 任务（队列深度=1：如果队列满则丢弃旧的，始终保留最新一份）。
@@ -316,7 +338,9 @@ void main_control_task(void *argument)
     status.gx_dps = gx_dps;
     status.gy_dps = gy_dps;
     status.gz_dps = gz_dps;
-    status.speed_mps = 0.0f;
+    status.speed_mps = enc_reading.avg_speed_mps;
+    status.wheel_l_mps = enc_reading.left.speed_filtered_mps;
+    status.wheel_r_mps = enc_reading.right.speed_filtered_mps;
     status.pwm_l = 0;
     status.pwm_r = 0;
     status.mode = cmd.mode;
@@ -362,15 +386,11 @@ void comm_task(void *argument)
 
       StatusData_t s;
       if (StatusStore_Read(&s)) {
-        (void)VOFA_SendImu8_Dma(&huart3,
-                               s.pitch_deg,
-                               s.pitch_acc_deg,
-                               s.ax_g,
-                               s.ay_g,
-                               s.az_g,
-                               s.gx_dps,
-                               s.gy_dps,
-                               s.gz_dps);
+        (void)VOFA_SendPitch2Speed2_Dma(&huart3,
+                                       s.pitch_deg,
+                                       s.pitch_acc_deg,
+                                       s.wheel_l_mps,
+                                       s.wheel_r_mps);
       }
     }
   }

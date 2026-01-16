@@ -4,18 +4,18 @@
 
 ## 0. 现状与约束（来自工程配置）
 
-- UART：USART3 `921600 8N1`（见 `doc/basic_infro.md`）
+- UART：USART3 `921600 8N1`（见 `doc/basic_info.md`）
 - DMA：
   - RX：`DMA1_Stream1` Circular + High priority（持续接收，不丢字节）
   - TX：`DMA1_Stream3` Normal（按帧发送）
 - RTOS：CMSIS-RTOS2
   - 输入队列：`xHostCommandQueue` 深度=1（只保留最新目标）
-  - 输出队列：`xStatusQueue` 深度=1（只保留最新状态快照）
+  - 状态输出：`StatusStore`（只保留最新状态快照，供通信任务按需读取）
 - 中断优先级：相关 IRQ 均为 priority=5（满足 FromISR 约束）
 
 ## 1. 协议（引用 v2 规范）
 
-协议帧格式/MSG_ID/CRC 等以 `doc/plan_v2.md` 为准（避免多处维护）。本计划仅定义落地实现方式：
+协议帧格式/MSG_ID/CRC 等以 `doc/plan/plan_v2.md` 为准（避免多处维护）。本计划仅定义落地实现方式：
 
 - 帧：`SOF(0xAA55) + VER + LEN + MSG_ID + FLAGS + SEQ + PAYLOAD + CRC16(CCITT-FALSE)`
 - RX 端：允许丢包、允许任意字节插入/丢失；通过扫描 SOF + LEN + CRC 完成快速重同步
@@ -56,7 +56,7 @@
    - `SET_TARGET`/`ESTOP`/`SET_PID`：更新 `HostCommand_t` 并写入 `xHostCommandQueue`（深度=1 语义）
    - 若 FLAGS 请求 ACK：回 `ACK` 帧（带 SEQ）
 5) 对遥测：
-   - 从 `xStatusQueue` 取最新 `StatusData_t`（取不到就沿用上次快照）
+   - 从 `StatusStore` 取最新 `StatusData_t`（取不到就沿用上次快照）
    - 按配置（period/mask）发送 `STATUS` / `IMU_RAW`
 
 ## 4. 里程碑与工作分解（WBS）
@@ -121,4 +121,3 @@
 - 命令：`SET_TARGET/ESTOP/TELEM_CONFIG` 可用，能驱动 `xHostCommandQueue`
 - 遥测：默认 `STATUS@10ms`，可配置 `IMU_RAW`
 - 不提交图片资产：`/images` 不纳入版本库（按当前约定）
-
