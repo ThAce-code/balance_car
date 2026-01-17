@@ -33,6 +33,7 @@
 #include "status_store.h"
 #include "vofa_telemetry.h"
 #include "encoder.h"
+#include "comm.h"
 
 #include <math.h>
 
@@ -360,30 +361,50 @@ void main_control_task(void *argument)
 void comm_task(void *argument)
 {
   /* USER CODE BEGIN comm_task */
-  // RX DMA echo 测试：PC 发什么过来，就原样回显什么。
-  // 本次测试先不周期性发送 IMU（VOFA+），避免刷屏。
 
+#if (APP_UART3_ECHO_ENABLE != 0)
+  // Echo 模式：PC 发什么 MCU 回什么（用于接线/串口基本链路验证）
   (void)UART_Echo_StartRxDma(&huart3);
 
-  // Telemetry (VOFA+ JustFloat): send latest status snapshot periodically via TX DMA.
-  const uint32_t kTelemetryPeriodMs = 20; // 50Hz
-  uint32_t next_tx_ms = HAL_GetTick() + kTelemetryPeriodMs;
-
-  /* Infinite loop */
   for(;;)
   {
-    // Wait for RX/TX events, but wake up periodically to send telemetry.
-    uint32_t flags = osThreadFlagsWait(UART_ECHO_FLAG_RX | UART_ECHO_FLAG_TX, osFlagsWaitAny, 5);
+    uint32_t flags = osThreadFlagsWait(UART_ECHO_FLAG_RX | UART_ECHO_FLAG_TX, osFlagsWaitAny, 20);
     if ((int32_t)flags >= 0) {
       if ((flags & (UART_ECHO_FLAG_RX | UART_ECHO_FLAG_TX)) != 0u) {
         UART_Echo_TaskPump(&huart3);
       }
     }
+  }
+#else
+  // 协议模式：RX=comm 解析命令；TX=协议遥测（默认）或 VOFA 遥测（可选）
+  static uint8_t rx_dma_buf[256];
+  comm_config_t cfg = {
+    .huart = &huart3,
+    .cmd_queue = xHostCommandQueueHandle,
+    .rx_dma_buf = rx_dma_buf,
+    .rx_dma_buf_size = (uint16_t)sizeof(rx_dma_buf),
+  };
+  Comm_Init(&cfg);
+  Comm_StartRx();
 
+  #if (APP_UART3_TELEM_VOFA != 0)
+  // VOFA 遥测：保持与旧链路一致的 50Hz 发送节拍
+  const uint32_t kVofaPeriodMs = 20u;
+  uint32_t next_vofa_ms = HAL_GetTick() + kVofaPeriodMs;
+  #endif
+
+  for(;;)
+  {
+    Comm_Poll();
+
+  #if (APP_UART3_TELEM_PROTOCOL != 0)
+    Comm_TelemetryTick();
+  #endif
+
+  #if (APP_UART3_TELEM_VOFA != 0)
     uint32_t now_ms = HAL_GetTick();
-    if ((int32_t)(now_ms - next_tx_ms) >= 0) {
-      next_tx_ms += kTelemetryPeriodMs;
-
+    if ((int32_t)(now_ms - next_vofa_ms) >= 0) {
+      next_vofa_ms = now_ms + kVofaPeriodMs;
       StatusData_t s;
       if (StatusStore_Read(&s)) {
         (void)VOFA_SendPitch2Speed2_Dma(&huart3,
@@ -393,7 +414,11 @@ void comm_task(void *argument)
                                        s.wheel_r_mps);
       }
     }
+  #endif
+
+    osDelay(10);
   }
+#endif
   /* USER CODE END comm_task */
 }
 
@@ -426,4 +451,3 @@ void OLED_display_task(void *argument)
 /* USER CODE BEGIN Application */
 
 /* USER CODE END Application */
-

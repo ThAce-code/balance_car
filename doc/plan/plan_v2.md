@@ -115,12 +115,13 @@ CRC16    : 2B  CRC-16/CCITT-FALSE(poly=0x1021, init=0xFFFF)
 
 #### MCU → Host
 
-- `0x10 STATUS`（默认打开，建议 10ms/100Hz）
+- `0x10 STATUS`（默认打开，建议 20ms/50Hz；后续可按带宽与需要调整）
   - `uint32 timestamp_ms`
-  - `float pitch_deg`
-  - `float gyro_y_dps`（或主要控制轴角速度）
-  - `float speed_mps`
-  - `int16 pwm_l`（-1000..1000 或 -100..100，需统一约定）
+  - `float pitch_deg`（滤波后）
+  - `float pitch_acc_deg`（仅加速度推算，用于对比/调参）
+  - `float wheel_l_mps`
+  - `float wheel_r_mps`
+  - `int16 pwm_l`
   - `int16 pwm_r`
   - `uint8 mode`
   - `uint16 fault_bits`

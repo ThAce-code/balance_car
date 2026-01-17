@@ -116,6 +116,16 @@ bool Encoder_Update(float dt_s, encoder_reading_t *out)
     g_enc.left.speed_filtered_mps = alpha * speed_l + one_minus_alpha * g_enc.left.speed_filtered_mps;
     g_enc.right.speed_filtered_mps = alpha * speed_r + one_minus_alpha * g_enc.right.speed_filtered_mps;
 
+    // 死区钳零：避免低通滤波指数衰减后落入 float 次正规区，导致“理论 0 但非 0”的尾巴。
+    // 阈值设得很小，仅用于清理数值残留，不影响正常低速运动。
+    const float kSpeedDeadzoneMps = 1e-6f;
+    if (fabsf(g_enc.left.speed_filtered_mps) < kSpeedDeadzoneMps) {
+        g_enc.left.speed_filtered_mps = 0.0f;
+    }
+    if (fabsf(g_enc.right.speed_filtered_mps) < kSpeedDeadzoneMps) {
+        g_enc.right.speed_filtered_mps = 0.0f;
+    }
+
     /* 7. 填充输出 */
     out->left.delta_counts = delta_l;
     out->left.speed_mps = speed_l;

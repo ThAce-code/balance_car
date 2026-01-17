@@ -27,6 +27,35 @@
 #include "string.h"
 
 // =========================
+// UART3 功能编译开关（P2 阶段二）
+// =========================
+// 默认：协议遥测（MCU->Host 发送二进制 STATUS 帧），RX 走 comm 协议解析。
+// 可选：VOFA 遥测（MCU->Host 发送 JustFloat），用于 VOFA+ 画图。
+// Echo 调试：PC 发什么 MCU 回什么（占用 RX/TX 链路，不与遥测并存）。
+
+#ifndef APP_UART3_TELEM_PROTOCOL
+#define APP_UART3_TELEM_PROTOCOL 1
+#endif
+
+#ifndef APP_UART3_TELEM_VOFA
+#define APP_UART3_TELEM_VOFA 0
+#endif
+
+#ifndef APP_UART3_ECHO_ENABLE
+#define APP_UART3_ECHO_ENABLE 0
+#endif
+
+#if (APP_UART3_ECHO_ENABLE != 0)
+  #if ((APP_UART3_TELEM_PROTOCOL != 0) || (APP_UART3_TELEM_VOFA != 0))
+    #error "Echo mode: set APP_UART3_TELEM_PROTOCOL=0 and APP_UART3_TELEM_VOFA=0"
+  #endif
+#else
+  #if (APP_UART3_TELEM_PROTOCOL + APP_UART3_TELEM_VOFA) != 1
+    #error "Choose exactly one of APP_UART3_TELEM_PROTOCOL / APP_UART3_TELEM_VOFA"
+  #endif
+#endif
+
+// =========================
 // 通信/控制数据结构
 // =========================
 // 说明：这些结构体会被用于 CMSIS-RTOS2 message queue（见 `Core/Src/freertos.c`），
